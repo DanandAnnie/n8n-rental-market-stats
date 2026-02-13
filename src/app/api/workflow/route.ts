@@ -23,16 +23,31 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify(body),
     });
 
+    const responseText = await response.text();
+
     if (!response.ok) {
-      throw new Error(`n8n webhook returned ${response.status}`);
+      return NextResponse.json(
+        {
+          error: `n8n webhook returned ${response.status}`,
+          detail: responseText.substring(0, 500),
+        },
+        { status: 502 }
+      );
     }
 
-    const data = await response.json();
-    return NextResponse.json(data);
+    try {
+      const data = JSON.parse(responseText);
+      return NextResponse.json(data);
+    } catch {
+      return NextResponse.json(
+        { error: "Invalid JSON from webhook", detail: responseText.substring(0, 500) },
+        { status: 502 }
+      );
+    }
   } catch (error) {
-    console.error("Workflow error:", error);
+    const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json(
-      { error: "Failed to execute workflow" },
+      { error: "Failed to execute workflow", detail: message },
       { status: 500 }
     );
   }

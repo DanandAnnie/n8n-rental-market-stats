@@ -60,11 +60,12 @@ export default function RentalMarketStats() {
         }),
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        throw new Error("Failed to generate rental market report");
+        throw new Error(data.detail || data.error || "Failed to generate rental market report");
       }
 
-      const data = await response.json();
       setResult(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
