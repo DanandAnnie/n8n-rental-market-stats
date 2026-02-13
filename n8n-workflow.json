@@ -1,0 +1,419 @@
+{
+  "name": "Rental Market Stats Report",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "rental-market-stats",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [240, 460],
+      "webhookId": "rental-market-stats"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract webhook input and set variables\nconst body = $input.first().json.body || $input.first().json;\n\nconst frequency = body.frequency || 'monthly';\nconst customMessage = body.customMessage || '';\nconst now = new Date();\nconst currentDate = now.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });\nconst region = 'St. George / Washington County, UT';\n\nreturn {\n  json: {\n    frequency,\n    customMessage,\n    currentDate,\n    region\n  }\n};"
+      },
+      "id": "set-variables",
+      "name": "Set Variables",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 460]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tavily.com/search",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"api_key\": \"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\",\n  \"query\": \"average rent prices 1 bedroom 2 bedroom 3 bedroom apartment St. George Washington County Utah 2026\",\n  \"search_depth\": \"advanced\",\n  \"max_results\": 5,\n  \"include_domains\": [\"zillow.com\", \"apartments.com\", \"rentometer.com\", \"rent.com\", \"apartmentlist.com\"]\n}",
+        "options": {}
+      },
+      "id": "tavily-rents",
+      "name": "Tavily: Average Rents",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 240]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tavily.com/search",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"api_key\": \"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\",\n  \"query\": \"rental vacancy rate St. George Washington County Utah current 2026\",\n  \"search_depth\": \"advanced\",\n  \"max_results\": 5\n}",
+        "options": {}
+      },
+      "id": "tavily-vacancy",
+      "name": "Tavily: Vacancy Rates",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 460]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tavily.com/search",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"api_key\": \"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\",\n  \"query\": \"rental market trends news St. George Utah year over year month over month rent increase 2026\",\n  \"topic\": \"news\",\n  \"search_depth\": \"advanced\",\n  \"max_results\": 5\n}",
+        "options": {}
+      },
+      "id": "tavily-trends",
+      "name": "Tavily: Market Trends",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 680]
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "searchResults",
+        "options": {}
+      },
+      "id": "aggregate-results",
+      "name": "Aggregate Search Results",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [960, 460]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "id": "merge-data",
+      "name": "Merge Data",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [1200, 460]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Tavily search results and extract rental market metrics\nconst searchData = $('Aggregate Search Results').first().json;\nconst variables = $('Set Variables').first().json;\n\n// Combine all search result content\nlet allContent = '';\nif (searchData.searchResults) {\n  for (const result of searchData.searchResults) {\n    if (result.results) {\n      for (const r of result.results) {\n        allContent += (r.content || '') + '\\n';\n      }\n    }\n  }\n}\n\n// Extract rent figures using patterns (fallback to estimates if not found)\nfunction extractRent(text, bedrooms) {\n  const patterns = [\n    new RegExp(`${bedrooms}[- ]?(?:bed(?:room)?|br).*?\\\\$([\\\\d,]+)`, 'i'),\n    new RegExp(`\\\\$([\\\\d,]+).*?${bedrooms}[- ]?(?:bed(?:room)?|br)`, 'i'),\n  ];\n  for (const pattern of patterns) {\n    const match = text.match(pattern);\n    if (match) return '$' + match[1];\n  }\n  return null;\n}\n\n// Extract percentage\nfunction extractPercentage(text, keyword) {\n  const pattern = new RegExp(`${keyword}.*?([-+]?\\\\d+\\\\.?\\\\d*)\\\\s*%`, 'i');\n  const match = text.match(pattern);\n  if (match) return match[1] + '%';\n  \n  const pattern2 = new RegExp(`([-+]?\\\\d+\\\\.?\\\\d*)\\\\s*%.*?${keyword}`, 'i');\n  const match2 = text.match(pattern2);\n  if (match2) return match2[1] + '%';\n  return null;\n}\n\n// Best-effort extraction with fallbacks\nconst stats = {\n  avgRent1BR: extractRent(allContent, '1') || 'Data pending',\n  avgRent2BR: extractRent(allContent, '2') || 'Data pending',\n  avgRent3BR: extractRent(allContent, '3') || 'Data pending',\n  vacancyRate: extractPercentage(allContent, 'vacancy') || 'Data pending',\n  monthlyChange: extractPercentage(allContent, 'month') || 'Data pending',\n  yearlyChange: extractPercentage(allContent, 'year') || 'Data pending'\n};\n\nreturn {\n  json: {\n    stats,\n    rawContent: allContent.substring(0, 3000),\n    frequency: variables.frequency,\n    customMessage: variables.customMessage,\n    currentDate: variables.currentDate,\n    region: variables.region\n  }\n};"
+      },
+      "id": "parse-data",
+      "name": "Parse Rental Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 460]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Write a professional rental market analysis for {{ $json.region }} based on this data:\n\nRental Stats:\n- 1BR Average Rent: {{ $json.stats.avgRent1BR }}\n- 2BR Average Rent: {{ $json.stats.avgRent2BR }}\n- 3BR Average Rent: {{ $json.stats.avgRent3BR }}\n- Vacancy Rate: {{ $json.stats.vacancyRate }}\n- Month-over-Month Change: {{ $json.stats.monthlyChange }}\n- Year-over-Year Change: {{ $json.stats.yearlyChange }}\n\nRaw Research Data:\n{{ $json.rawContent }}\n\nThis is a {{ $json.frequency }} report dated {{ $json.currentDate }}.\n\nWrite 3-4 paragraphs that:\n1. Summarize the current state of the rental market\n2. Explain what these trends mean for landlords and investors\n3. Provide 2-3 actionable insights or recommendations\n4. Reference specific numbers naturally within the narrative\n\nKeep the tone professional but approachable. Position the reader as a knowledgeable real estate investor.",
+        "options": {
+          "systemMessage": "You are a professional real estate market analyst specializing in rental markets in St. George and Washington County, Utah. Your audience is landlords, property investors, and real estate professionals. Your tone is professional but approachable - knowledgeable but not condescending. You help clients understand what rental market data means for their investment decisions."
+        }
+      },
+      "id": "ai-writer",
+      "name": "AI Market Analyst",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [1680, 460]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "options": {
+          "maxTokens": 1500,
+          "temperature": 0.7
+        }
+      },
+      "id": "openai-model",
+      "name": "OpenAI GPT-4o-mini",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [1720, 720]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build branded HTML email\nconst data = $('Parse Rental Data').first().json;\nconst commentary = $input.first().json.output;\nconst stats = data.stats;\nconst frequency = data.frequency;\nconst currentDate = data.currentDate;\nconst customMessage = data.customMessage;\n\nconst frequencyLabel = frequency === 'weekly' ? 'Weekly' : 'Monthly';\n\n// Custom message block\nconst customMessageBlock = customMessage ? `\n  <tr>\n    <td style=\"padding: 0 30px 30px 30px;\">\n      <table role=\"presentation\" style=\"width: 100%; background-color: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 4px;\">\n        <tr>\n          <td style=\"padding: 15px 20px;\">\n            <p style=\"margin: 0; font-weight: bold; color: #92400e; font-size: 14px;\">Personal Note</p>\n            <p style=\"margin: 8px 0 0 0; color: #78350f; font-size: 15px; line-height: 1.5;\">${customMessage}</p>\n          </td>\n        </tr>\n      </table>\n    </td>\n  </tr>` : '';\n\nconst htmlEmail = `\n<!DOCTYPE html>\n<html>\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <title>St. George Rental Market ${frequencyLabel} Report</title>\n</head>\n<body style=\"margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; background-color: #f4f4f4;\">\n  <table role=\"presentation\" style=\"width: 100%; border-collapse: collapse;\">\n    <tr>\n      <td align=\"center\" style=\"padding: 40px 0;\">\n        <table role=\"presentation\" style=\"width: 600px; border-collapse: collapse; background-color: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden;\">\n          \n          <!-- Header -->\n          <tr>\n            <td style=\"background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px; text-align: center;\">\n              <h1 style=\"color: white; margin: 0; font-size: 28px; font-weight: bold;\">St. George Rental Market Report</h1>\n              <p style=\"color: rgba(255,255,255,0.9); margin: 8px 0 0 0; font-size: 16px;\">${frequencyLabel} Update | ${currentDate}</p>\n            </td>\n          </tr>\n          \n          <!-- Metrics Grid -->\n          <tr>\n            <td style=\"padding: 30px;\">\n              <table role=\"presentation\" style=\"width: 100%; border-collapse: separate; border-spacing: 10px;\">\n                <tr>\n                  <td style=\"width: 33%; background-color: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center;\">\n                    <p style=\"margin: 0; font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px;\">1BR Average</p>\n                    <p style=\"margin: 8px 0 0 0; font-size: 24px; font-weight: bold; color: #333;\">${stats.avgRent1BR}</p>\n                  </td>\n                  <td style=\"width: 33%; background-color: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center;\">\n                    <p style=\"margin: 0; font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px;\">2BR Average</p>\n                    <p style=\"margin: 8px 0 0 0; font-size: 24px; font-weight: bold; color: #333;\">${stats.avgRent2BR}</p>\n                  </td>\n                  <td style=\"width: 33%; background-color: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center;\">\n                    <p style=\"margin: 0; font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px;\">3BR Average</p>\n                    <p style=\"margin: 8px 0 0 0; font-size: 24px; font-weight: bold; color: #333;\">${stats.avgRent3BR}</p>\n                  </td>\n                </tr>\n                <tr>\n                  <td style=\"width: 33%; background-color: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center;\">\n                    <p style=\"margin: 0; font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px;\">Vacancy Rate</p>\n                    <p style=\"margin: 8px 0 0 0; font-size: 24px; font-weight: bold; color: #333;\">${stats.vacancyRate}</p>\n                  </td>\n                  <td style=\"width: 33%; background-color: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center;\">\n                    <p style=\"margin: 0; font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px;\">Month/Month</p>\n                    <p style=\"margin: 8px 0 0 0; font-size: 24px; font-weight: bold; color: #10b981;\">${stats.monthlyChange}</p>\n                  </td>\n                  <td style=\"width: 33%; background-color: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center;\">\n                    <p style=\"margin: 0; font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px;\">Year/Year</p>\n                    <p style=\"margin: 8px 0 0 0; font-size: 24px; font-weight: bold; color: #10b981;\">${stats.yearlyChange}</p>\n                  </td>\n                </tr>\n              </table>\n            </td>\n          </tr>\n          \n          <!-- AI Commentary -->\n          <tr>\n            <td style=\"padding: 0 30px 30px 30px;\">\n              <h2 style=\"color: #333; font-size: 20px; margin: 0 0 15px 0;\">Market Analysis</h2>\n              <div style=\"color: #555; font-size: 15px; line-height: 1.8;\">\n                ${commentary.replace(/\\n\\n/g, '</p><p style=\"margin: 15px 0;\">').replace(/\\n/g, '<br>')}\n              </div>\n            </td>\n          </tr>\n          \n          <!-- Custom Message -->\n          ${customMessageBlock}\n          \n          <!-- CTA -->\n          <tr>\n            <td style=\"padding: 0 30px 30px 30px; text-align: center;\">\n              <a href=\"mailto:washingtoncountyproperties@gmail.com\" style=\"display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 14px 32px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 15px;\">Schedule a Consultation</a>\n            </td>\n          </tr>\n          \n          <!-- Footer -->\n          <tr>\n            <td style=\"background-color: #f8f9fa; padding: 25px 30px; text-align: center;\">\n              <p style=\"color: #333; margin: 0; font-size: 14px; font-weight: bold;\">Washington County Property Services</p>\n              <p style=\"color: #666; margin: 8px 0 0 0; font-size: 13px;\">Daniel Stewart Team | <a href=\"tel:435-862-3242\" style=\"color: #667eea;\">435-862-3242</a></p>\n              <p style=\"color: #999; margin: 12px 0 0 0; font-size: 11px;\">Data collected from public sources. Market conditions subject to change.</p>\n            </td>\n          </tr>\n          \n        </table>\n      </td>\n    </tr>\n  </table>\n</body>\n</html>`;\n\nreturn {\n  json: {\n    html_body: htmlEmail,\n    subject: `St. George Rental Market ${frequencyLabel} Report - ${currentDate}`,\n    stats: stats,\n    reportPreview: commentary.substring(0, 300)\n  }\n};"
+      },
+      "id": "build-email",
+      "name": "Build HTML Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1920, 460]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://services.leadconnectorhq.com/contacts/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_GHL_API_KEY"
+            },
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "locationId",
+              "value": "YOUR_GHL_LOCATION_ID"
+            },
+            {
+              "name": "query",
+              "value": "Rental Market Report"
+            },
+            {
+              "name": "limit",
+              "value": "100"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ghl-contacts",
+      "name": "GHL: Get Contacts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2160, 460]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract contacts from GHL response\nconst ghlResponse = $input.first().json;\nconst contacts = ghlResponse.contacts || [];\n\n// Get email data from Build HTML Email node\nconst emailData = $('Build HTML Email').first().json;\n\nconst items = contacts\n  .filter(c => c.email)\n  .map(contact => ({\n    json: {\n      email: contact.email,\n      firstName: contact.firstName || contact.name || 'Valued Client',\n      subject: emailData.subject,\n      html_body: emailData.html_body,\n      stats: emailData.stats,\n      reportPreview: emailData.reportPreview\n    }\n  }));\n\n// If no contacts, return email data for response\nif (items.length === 0) {\n  return [{\n    json: {\n      ...emailData,\n      emailsSent: 0,\n      message: 'No contacts found with Rental Market Report tag'\n    }\n  }];\n}\n\nreturn items;"
+      },
+      "id": "prepare-contacts",
+      "name": "Prepare Contact List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2400, 460]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "split-batches",
+      "name": "Split In Batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [2640, 460]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.html_body }}",
+        "options": {}
+      },
+      "id": "send-email",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2880, 460]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate results and prepare webhook response\nconst emailData = $('Build HTML Email').first().json;\nconst allItems = $input.all();\nconst emailsSent = allItems.length;\n\nreturn {\n  json: {\n    success: true,\n    emailsSent: emailsSent,\n    stats: emailData.stats,\n    reportPreview: emailData.reportPreview,\n    generatedAt: new Date().toISOString()\n  }\n};"
+      },
+      "id": "prepare-response",
+      "name": "Prepare Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3120, 460]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Set Variables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Variables": {
+      "main": [
+        [
+          {
+            "node": "Tavily: Average Rents",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Tavily: Vacancy Rates",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Tavily: Market Trends",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tavily: Average Rents": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Search Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tavily: Vacancy Rates": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Search Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tavily: Market Trends": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Search Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Search Results": {
+      "main": [
+        [
+          {
+            "node": "Merge Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Data": {
+      "main": [
+        [
+          {
+            "node": "Parse Rental Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Rental Data": {
+      "main": [
+        [
+          {
+            "node": "AI Market Analyst",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI GPT-4o-mini": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Market Analyst",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Market Analyst": {
+      "main": [
+        [
+          {
+            "node": "Build HTML Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build HTML Email": {
+      "main": [
+        [
+          {
+            "node": "GHL: Get Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL: Get Contacts": {
+      "main": [
+        [
+          {
+            "node": "Prepare Contact List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Contact List": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split In Batches": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
