@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
+// Extend timeout for n8n webhook (research + AI takes ~20s)
+export const maxDuration = 60;
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
