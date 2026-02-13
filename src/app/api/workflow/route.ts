@@ -7,7 +7,12 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
-    const webhookUrl = process.env.N8N_WEBHOOK_URL;
+    let webhookUrl = process.env.N8N_WEBHOOK_URL;
+    // Fix malformed env var (Vercel stored as "N8N_WEBHOOK_URL=https://...")
+    if (webhookUrl?.startsWith("N8N_WEBHOOK_URL=")) {
+      webhookUrl = webhookUrl.replace("N8N_WEBHOOK_URL=", "");
+    }
+    webhookUrl = webhookUrl?.trim();
     if (!webhookUrl) {
       return NextResponse.json(
         { error: "N8N_WEBHOOK_URL not configured" },
