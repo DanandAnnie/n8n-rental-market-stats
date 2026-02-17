@@ -5,8 +5,8 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Rental Market Stats | St. George Real Estate",
-  description: "Generate and send rental market analysis reports for Washington County, UT",
+  title: "Washington County Market Stats | Daniel Stewart Team",
+  description: "Generate polished market reports and send to your client list",
 };
 
 export default function RootLayout({
